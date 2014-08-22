@@ -64,7 +64,7 @@ final class RpcHandler extends SimpleChannelUpstreamHandler {
   private final TSDB tsdb;
 
   /**
-   * Constructor that loads the CORS domain list and configures the route maps 
+   * Constructor that loads the CORS domain list and configures the route maps
    * for telnet and HTTP requests
    * @param tsdb The TSDB to use.
    * @throws IllegalArgumentException if there was an error with the CORS domain
@@ -83,14 +83,14 @@ final class RpcHandler extends SimpleChannelUpstreamHandler {
       for (final String domain : domains) {
         if (domain.equals("*") && domains.length > 1) {
           throw new IllegalArgumentException(
-              "tsd.http.request.cors_domains must be a public resource (*) or " 
+              "tsd.http.request.cors_domains must be a public resource (*) or "
               + "a list of specific domains, you cannot mix both.");
         }
         cors_domains.add(domain.trim().toUpperCase());
         LOG.info("Loaded CORS domain (" + domain + ")");
       }
     }
-    
+
     telnet_commands = new HashMap<String, TelnetRpc>(7);
     http_commands = new HashMap<String, HttpRpc>(11);
     {
@@ -128,6 +128,12 @@ final class RpcHandler extends SimpleChannelUpstreamHandler {
       final PutDataPointRpc put = new PutDataPointRpc();
       telnet_commands.put("put", put);
       http_commands.put("api/put", put);
+    }
+
+	{
+      final BatchDataPointRpc batch = new BatchDataPointRpc();
+      telnet_commands.put("batch", batch);
+      http_commands.put("api/batch", batch);
     }
 
     http_commands.put("", new HomePage());
@@ -208,23 +214,23 @@ final class RpcHandler extends SimpleChannelUpstreamHandler {
       return;
     }
     try {
-      try {        
+      try {
         final String route = query.getQueryBaseRoute();
         query.setSerializer();
-        
+
         final String domain = req.headers().get("Origin");
-        
+
         // catch CORS requests and add the header or refuse them if the domain
         // list has been configured
-        if (query.method() == HttpMethod.OPTIONS || 
-            (cors_domains != null && domain != null && !domain.isEmpty())) {          
+        if (query.method() == HttpMethod.OPTIONS ||
+            (cors_domains != null && domain != null && !domain.isEmpty())) {
           if (cors_domains == null || domain == null || domain.isEmpty()) {
-            throw new BadRequestException(HttpResponseStatus.METHOD_NOT_ALLOWED, 
-                "Method not allowed", "The HTTP method [" + 
+            throw new BadRequestException(HttpResponseStatus.METHOD_NOT_ALLOWED,
+                "Method not allowed", "The HTTP method [" +
                 query.method().getName() + "] is not permitted");
           }
-          
-          if (cors_domains.contains("*") || 
+
+          if (cors_domains.contains("*") ||
               cors_domains.contains(domain.toUpperCase())) {
 
             // when a domain has matched successfully, we need to add the header
@@ -244,12 +250,12 @@ final class RpcHandler extends SimpleChannelUpstreamHandler {
             // the Origin wasn't in the CORS domain list, but they want a 200
             // without the allow origin header. We'll return an error in the
             // body though.
-            throw new BadRequestException(HttpResponseStatus.OK, 
-                "CORS domain not allowed", "The domain [" + domain + 
+            throw new BadRequestException(HttpResponseStatus.OK,
+                "CORS domain not allowed", "The domain [" + domain +
                 "] is not permitted access");
           }
         }
-        
+
         final HttpRpc rpc = http_commands.get(route);
         if (rpc != null) {
           rpc.execute(tsdb, query);
@@ -354,7 +360,7 @@ final class RpcHandler extends SimpleChannelUpstreamHandler {
 
   /** The home page ("GET /"). */
   private static final class HomePage implements HttpRpc {
-    public void execute(final TSDB tsdb, final HttpQuery query) 
+    public void execute(final TSDB tsdb, final HttpQuery query)
       throws IOException {
       final StringBuilder buf = new StringBuilder(2048);
       buf.append("<div id=queryuimain></div>"
@@ -371,16 +377,16 @@ final class RpcHandler extends SimpleChannelUpstreamHandler {
 
   /** The "/aggregators" endpoint. */
   private static final class ListAggregators implements HttpRpc {
-    public void execute(final TSDB tsdb, final HttpQuery query) 
+    public void execute(final TSDB tsdb, final HttpQuery query)
       throws IOException {
-      
+
       // only accept GET/POST
       if (query.method() != HttpMethod.GET && query.method() != HttpMethod.POST) {
-        throw new BadRequestException(HttpResponseStatus.METHOD_NOT_ALLOWED, 
+        throw new BadRequestException(HttpResponseStatus.METHOD_NOT_ALLOWED,
             "Method not allowed", "The HTTP method [" + query.method().getName() +
             "] is not permitted for this endpoint");
       }
-      
+
       if (query.apiVersion() > 0) {
         query.sendReply(
             query.serializer().formatAggregatorsV1(Aggregators.set()));
@@ -411,16 +417,16 @@ final class RpcHandler extends SimpleChannelUpstreamHandler {
       return Deferred.fromResult(null);
     }
 
-    public void execute(final TSDB tsdb, final HttpQuery query) throws 
+    public void execute(final TSDB tsdb, final HttpQuery query) throws
       IOException {
-      
+
       // only accept GET/POST
       if (query.method() != HttpMethod.GET && query.method() != HttpMethod.POST) {
-        throw new BadRequestException(HttpResponseStatus.METHOD_NOT_ALLOWED, 
+        throw new BadRequestException(HttpResponseStatus.METHOD_NOT_ALLOWED,
             "Method not allowed", "The HTTP method [" + query.method().getName() +
             "] is not permitted for this endpoint");
       }
-      
+
       final HashMap<String, String> version = new HashMap<String, String>();
       version.put("version", BuildData.version);
       version.put("short_revision", BuildData.short_revision);
@@ -430,11 +436,11 @@ final class RpcHandler extends SimpleChannelUpstreamHandler {
       version.put("user", BuildData.user);
       version.put("host", BuildData.host);
       version.put("repo", BuildData.repo);
-      
+
       if (query.apiVersion() > 0) {
         query.sendReply(query.serializer().formatVersionV1(version));
       } else {
-        final boolean json = query.request().getUri().endsWith("json");      
+        final boolean json = query.request().getUri().endsWith("json");
         if (json) {
           query.sendReply(JSON.serializeToBytes(version));
         } else {
@@ -482,17 +488,17 @@ final class RpcHandler extends SimpleChannelUpstreamHandler {
       return Deferred.fromResult(null);
     }
 
-    public void execute(final TSDB tsdb, final HttpQuery query) 
+    public void execute(final TSDB tsdb, final HttpQuery query)
       throws IOException {
       dropCaches(tsdb, query.channel());
-      
+
       // only accept GET/POST
       if (query.method() != HttpMethod.GET && query.method() != HttpMethod.POST) {
-        throw new BadRequestException(HttpResponseStatus.METHOD_NOT_ALLOWED, 
+        throw new BadRequestException(HttpResponseStatus.METHOD_NOT_ALLOWED,
             "Method not allowed", "The HTTP method [" + query.method().getName() +
             "] is not permitted for this endpoint");
       }
-      
+
       if (query.apiVersion() > 0) {
         final HashMap<String, String> response = new HashMap<String, String>();
         response.put("status", "200");
@@ -510,56 +516,56 @@ final class RpcHandler extends SimpleChannelUpstreamHandler {
     }
   }
 
-  /** The /api/formatters endpoint 
+  /** The /api/formatters endpoint
    * @since 2.0 */
   private static final class Serializers implements HttpRpc {
-    public void execute(final TSDB tsdb, final HttpQuery query) 
+    public void execute(final TSDB tsdb, final HttpQuery query)
       throws IOException {
       // only accept GET/POST
       if (query.method() != HttpMethod.GET && query.method() != HttpMethod.POST) {
-        throw new BadRequestException(HttpResponseStatus.METHOD_NOT_ALLOWED, 
+        throw new BadRequestException(HttpResponseStatus.METHOD_NOT_ALLOWED,
             "Method not allowed", "The HTTP method [" + query.method().getName() +
             "] is not permitted for this endpoint");
       }
-      
+
       switch (query.apiVersion()) {
         case 0:
         case 1:
           query.sendReply(query.serializer().formatSerializersV1());
           break;
-        default: 
-          throw new BadRequestException(HttpResponseStatus.NOT_IMPLEMENTED, 
-              "Requested API version not implemented", "Version " + 
+        default:
+          throw new BadRequestException(HttpResponseStatus.NOT_IMPLEMENTED,
+              "Requested API version not implemented", "Version " +
               query.apiVersion() + " is not implemented");
       }
     }
   }
-  
+
   private static final class ShowConfig implements HttpRpc {
 
     @Override
     public void execute(TSDB tsdb, HttpQuery query) throws IOException {
    // only accept GET/POST
       if (query.method() != HttpMethod.GET && query.method() != HttpMethod.POST) {
-        throw new BadRequestException(HttpResponseStatus.METHOD_NOT_ALLOWED, 
+        throw new BadRequestException(HttpResponseStatus.METHOD_NOT_ALLOWED,
             "Method not allowed", "The HTTP method [" + query.method().getName() +
             "] is not permitted for this endpoint");
       }
-      
+
       switch (query.apiVersion()) {
         case 0:
         case 1:
           query.sendReply(query.serializer().formatConfigV1(tsdb.getConfig()));
           break;
-        default: 
-          throw new BadRequestException(HttpResponseStatus.NOT_IMPLEMENTED, 
-              "Requested API version not implemented", "Version " + 
+        default:
+          throw new BadRequestException(HttpResponseStatus.NOT_IMPLEMENTED,
+              "Requested API version not implemented", "Version " +
               query.apiVersion() + " is not implemented");
       }
     }
-    
+
   }
-  
+
   // ---------------- //
   // Logging helpers. //
   // ---------------- //

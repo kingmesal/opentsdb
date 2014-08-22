@@ -25,6 +25,8 @@ import org.slf4j.LoggerFactory;
 
 import com.stumbleupon.async.Callback;
 import com.stumbleupon.async.Deferred;
+import java.util.Map;
+import net.opentsdb.core.CachedBatches;
 
 import net.opentsdb.core.DataPoints;
 import net.opentsdb.core.Query;
@@ -39,32 +41,32 @@ import net.opentsdb.meta.Annotation;
  * Handles queries for timeseries datapoints. Each request is parsed into a
  * TSQuery object, the values given validated, and if all tests pass, the
  * query is converted into TsdbQueries and each one is executed to fetch the
- * data. The resulting DataPoints[] are then passed to serializers for 
+ * data. The resulting DataPoints[] are then passed to serializers for
  * formatting.
  * <p>
- * Some private methods are included for parsing query string data into a 
+ * Some private methods are included for parsing query string data into a
  * TSQuery object.
  * @since 2.0
  */
 final class QueryRpc implements HttpRpc {
   private static final Logger LOG = LoggerFactory.getLogger(QueryRpc.class);
-  
+
   /**
    * Implements the /api/query endpoint to fetch data from OpenTSDB.
    * @param tsdb The TSDB to use for fetching data
    * @param query The HTTP query for parsing and responding
    */
   @Override
-  public void execute(final TSDB tsdb, final HttpQuery query) 
+  public void execute(final TSDB tsdb, final HttpQuery query)
     throws IOException {
-    
+
     // only accept GET/POST
     if (query.method() != HttpMethod.GET && query.method() != HttpMethod.POST) {
-      throw new BadRequestException(HttpResponseStatus.METHOD_NOT_ALLOWED, 
+      throw new BadRequestException(HttpResponseStatus.METHOD_NOT_ALLOWED,
           "Method not allowed", "The HTTP method [" + query.method().getName() +
           "] is not permitted for this endpoint");
     }
-    
+
     final TSQuery data_query;
     if (query.method() == HttpMethod.POST) {
       switch (query.apiVersion()) {
@@ -72,31 +74,31 @@ final class QueryRpc implements HttpRpc {
       case 1:
         data_query = query.serializer().parseQueryV1();
         break;
-      default: 
-        throw new BadRequestException(HttpResponseStatus.NOT_IMPLEMENTED, 
-            "Requested API version not implemented", "Version " + 
+      default:
+        throw new BadRequestException(HttpResponseStatus.NOT_IMPLEMENTED,
+            "Requested API version not implemented", "Version " +
             query.apiVersion() + " is not implemented");
       }
     } else {
       data_query = this.parseQuery(tsdb, query);
     }
-    
+
     // validate and then compile the queries
     try {
       LOG.debug(data_query.toString());
       data_query.validateAndSetQuery();
     } catch (Exception e) {
-      throw new BadRequestException(HttpResponseStatus.BAD_REQUEST, 
+      throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
           e.getMessage(), data_query.toString(), e);
     }
-    
+
     Query[] tsdbqueries = data_query.buildQueries(tsdb);
     final int nqueries = tsdbqueries.length;
-    final ArrayList<DataPoints[]> results = 
+    final ArrayList<DataPoints[]> results =
       new ArrayList<DataPoints[]>(nqueries);
     final ArrayList<Deferred<DataPoints[]>> deferreds =
       new ArrayList<Deferred<DataPoints[]>>(nqueries);
-    
+
     for (int i = 0; i < nqueries; i++) {
       deferreds.add(tsdbqueries[i].runAsync());
     }
@@ -106,13 +108,31 @@ final class QueryRpc implements HttpRpc {
     * and add dump the results in an array
     */
     class QueriesCB implements Callback<Object, ArrayList<DataPoints[]>> {
-      public Object call(final ArrayList<DataPoints[]> query_results) 
-        throws Exception {
+	  @Override
+      public Object call(final ArrayList<DataPoints[]> query_results) throws Exception {
         results.addAll(query_results);
+		checkCache(query_results);
         return null;
       }
+
+	  /**
+	   * Check the cache for data points that may not have been persisted and add them
+	   * to the result set if they are in the time range of the query.
+	   */
+	  private void checkCache(final ArrayList<DataPoints[]> queryResults) {
+		if (queryResults.size() > 0) {
+		  DataPoints[] dps = queryResults.get(0);
+		  if (dps != null && dps[0] != null) {
+			DataPoints cachedDPs = CachedBatches.get(dps[0].metricName(), dps[0].getTags(),
+				  data_query.startTime(), data_query.endTime());
+			if (cachedDPs != null) {
+			  results.add(new DataPoints[]{cachedDPs});
+			}
+		  }
+		}
+	  }
     }
-    
+
     // if the user wants global annotations, we need to scan and fetch
     // TODO(cl) need to async this at some point. It's not super straight
     // forward as we can't just add it to the "deferreds" queue since the types
@@ -120,30 +140,30 @@ final class QueryRpc implements HttpRpc {
     List<Annotation> globals = null;
     if (!data_query.getNoAnnotations() && data_query.getGlobalAnnotations()) {
       try {
-        globals = Annotation.getGlobalAnnotations(tsdb, 
+        globals = Annotation.getGlobalAnnotations(tsdb,
             data_query.startTime() / 1000, data_query.endTime() / 1000)
             .joinUninterruptibly();
       } catch (Exception e) {
         throw new RuntimeException("Shouldn't be here", e);
       }
     }
-    
+
     try {
       Deferred.groupInOrder(deferreds).addCallback(new QueriesCB())
         .joinUninterruptibly();
     } catch (Exception e) {
       throw new RuntimeException("Shouldn't be here", e);
     }
-    
+
     switch (query.apiVersion()) {
     case 0:
     case 1:
-      query.sendReply(query.serializer().formatQueryV1(data_query, results, 
+      query.sendReply(query.serializer().formatQueryV1(data_query, results,
           globals));
       break;
-    default: 
-      throw new BadRequestException(HttpResponseStatus.NOT_IMPLEMENTED, 
-          "Requested API version not implemented", "Version " + 
+    default:
+      throw new BadRequestException(HttpResponseStatus.NOT_IMPLEMENTED,
+          "Requested API version not implemented", "Version " +
           query.apiVersion() + " is not implemented");
     }
   }
@@ -157,51 +177,51 @@ final class QueryRpc implements HttpRpc {
    */
   private TSQuery parseQuery(final TSDB tsdb, final HttpQuery query) {
     final TSQuery data_query = new TSQuery();
-    
+
     data_query.setStart(query.getRequiredQueryStringParam("start"));
     data_query.setEnd(query.getQueryStringParam("end"));
-    
+
     if (query.hasQueryStringParam("padding")) {
       data_query.setPadding(true);
     }
-    
+
     if (query.hasQueryStringParam("no_annotations")) {
       data_query.setNoAnnotations(true);
     }
-    
+
     if (query.hasQueryStringParam("global_annotations")) {
       data_query.setGlobalAnnotations(true);
     }
-    
+
     if (query.hasQueryStringParam("show_tsuids")) {
       data_query.setShowTSUIDs(true);
     }
-    
+
     if (query.hasQueryStringParam("ms")) {
       data_query.setMsResolution(true);
     }
-    
+
     // handle tsuid queries first
     if (query.hasQueryStringParam("tsuid")) {
-      final List<String> tsuids = query.getQueryStringParams("tsuid");     
+      final List<String> tsuids = query.getQueryStringParams("tsuid");
       for (String q : tsuids) {
         this.parseTsuidTypeSubQuery(q, data_query);
       }
     }
-    
+
     if (query.hasQueryStringParam("m")) {
-      final List<String> legacy_queries = query.getQueryStringParams("m");      
+      final List<String> legacy_queries = query.getQueryStringParams("m");
       for (String q : legacy_queries) {
         this.parseMTypeSubQuery(q, data_query);
       }
     }
-    
+
     if (data_query.getQueries() == null || data_query.getQueries().size() < 1) {
       throw new BadRequestException("Missing sub queries");
     }
     return data_query;
   }
-  
+
   /**
    * Parses a query string "m=..." type query and adds it to the TSQuery.
    * This will generate a TSSubQuery and add it to the TSQuery if successful
@@ -211,12 +231,12 @@ final class QueryRpc implements HttpRpc {
    * @throws BadRequestException if we are unable to parse the query or it is
    * missing components
    */
-  private void parseMTypeSubQuery(final String query_string, 
+  private void parseMTypeSubQuery(final String query_string,
       TSQuery data_query) {
     if (query_string == null || query_string.isEmpty()) {
       throw new BadRequestException("The query string was empty");
     }
-    
+
     // m is of the following forms:
     // agg:[interval-agg:][rate:]metric[{tag=value,...}]
     // where the parts in square brackets `[' .. `]' are optional.
@@ -227,34 +247,34 @@ final class QueryRpc implements HttpRpc {
           + (i < 2 ? "not enough" : "too many") + " :-separated parts)");
     }
     final TSSubQuery sub_query = new TSSubQuery();
-    
+
     // the aggregator is first
     sub_query.setAggregator(parts[0]);
-    
+
     i--; // Move to the last part (the metric name).
     HashMap<String, String> tags = new HashMap<String, String>();
     sub_query.setMetric(Tags.parseWithMetric(parts[i], tags));
     sub_query.setTags(tags);
-    
-    // parse out the rate and downsampler 
+
+    // parse out the rate and downsampler
     for (int x = 1; x < parts.length - 1; x++) {
       if (parts[x].toLowerCase().startsWith("rate")) {
         sub_query.setRate(true);
-        if (parts[x].indexOf("{") >= 0) {
+        if (parts[x].contains("{")) {
           sub_query.setRateOptions(QueryRpc.parseRateOptions(true, parts[x]));
         }
       } else if (Character.isDigit(parts[x].charAt(0))) {
         sub_query.setDownsample(parts[x]);
       }
     }
-    
+
     if (data_query.getQueries() == null) {
       final ArrayList<TSSubQuery> subs = new ArrayList<TSSubQuery>(1);
       data_query.setQueries(subs);
     }
     data_query.getQueries().add(sub_query);
   }
-  
+
   /**
    * Parses a "tsuid=..." type query and adds it to the TSQuery.
    * This will generate a TSSubQuery and add it to the TSQuery if successful
@@ -264,12 +284,12 @@ final class QueryRpc implements HttpRpc {
    * @throws BadRequestException if we are unable to parse the query or it is
    * missing components
    */
-  private void parseTsuidTypeSubQuery(final String query_string, 
+  private void parseTsuidTypeSubQuery(final String query_string,
       TSQuery data_query) {
     if (query_string == null || query_string.isEmpty()) {
       throw new BadRequestException("The tsuid query string was empty");
     }
-    
+
     // tsuid queries are of the following forms:
     // agg:[interval-agg:][rate:]tsuid[,s]
     // where the parts in square brackets `[' .. `]' are optional.
@@ -279,35 +299,35 @@ final class QueryRpc implements HttpRpc {
       throw new BadRequestException("Invalid parameter m=" + query_string + " ("
           + (i < 2 ? "not enough" : "too many") + " :-separated parts)");
     }
-    
+
     final TSSubQuery sub_query = new TSSubQuery();
-    
+
     // the aggregator is first
     sub_query.setAggregator(parts[0]);
-    
+
     i--; // Move to the last part (the metric name).
     final List<String> tsuid_array = Arrays.asList(parts[i].split(","));
     sub_query.setTsuids(tsuid_array);
-    
-    // parse out the rate and downsampler 
+
+    // parse out the rate and downsampler
     for (int x = 1; x < parts.length - 1; x++) {
       if (parts[x].toLowerCase().startsWith("rate")) {
         sub_query.setRate(true);
-        if (parts[x].indexOf("{") >= 0) {
+        if (parts[x].contains("{")) {
           sub_query.setRateOptions(QueryRpc.parseRateOptions(true, parts[x]));
         }
       } else if (Character.isDigit(parts[x].charAt(0))) {
         sub_query.setDownsample(parts[x]);
       }
     }
-    
+
     if (data_query.getQueries() == null) {
       final ArrayList<TSSubQuery> subs = new ArrayList<TSSubQuery>(1);
       data_query.setQueries(subs);
     }
     data_query.getQueries().add(sub_query);
   }
-  
+
   /**
    * Parses the "rate" section of the query string and returns an instance
    * of the RateOptions class that contains the values found.
