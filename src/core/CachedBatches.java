@@ -147,12 +147,18 @@ public class CachedBatches {
 		}
 	}
 
+	synchronized static void shutdownHook() {
+		for (Map.Entry<String, Batch> entry : batches.entrySet()) {
+			entry.getValue().shutdown();
+		}
+	}
+
 	/**
 	 * No reason to expose this to the rest of the code base.
 	 */
 	private static class Batch {
 
-		private final net.opentsdb.core.WritableDataPoints dataPoints;
+		private final WritableDataPoints dataPoints;
 		private long baseTime;
 
 		Batch(final long timestamp, final net.opentsdb.core.WritableDataPoints dataPoints) {
@@ -182,11 +188,20 @@ public class CachedBatches {
 		}
 
 		/**
+		 * This is pretty much only in the case of a shutdown where data will no longer be coming
+		 * in. Do not use this otherwise!
+		 */
+		void shutdown() {
+			dataPoints.persist();
+			baseTime = Long.MIN_VALUE;
+		}
+
+		/**
 		 * Data comes in time order, and if the BASE we had doesn't match the current base we have
 		 * hit a new hour. It is time to persist the records, reset the baseTime and continue adding
 		 * data points.
 		 */
-		private void persistIfNecessary(final long base) {
+		void persistIfNecessary(final long base) {
 			if (base != baseTime) {
 				dataPoints.persist();
 				baseTime = base;
