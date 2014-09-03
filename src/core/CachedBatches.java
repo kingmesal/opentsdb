@@ -38,7 +38,7 @@ public class CachedBatches {
 	 */
 	static {
 		final long delay = 1000 * 60;
-		TIMER.schedule(TIMER_TASK, delay);
+		TIMER.schedule(TIMER_TASK, delay, delay);
 	}
 
 	/**
