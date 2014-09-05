@@ -59,7 +59,7 @@ public class CachedBatches {
 	 * @return DataPoints for a maximum of one complete hour.
 	 */
 	public static DataPoints get(final String metric, final Map<String, String> tags) {
-		Batch batch = batches.get(metric + tags.hashCode());
+		Batch batch = batches.get(metric + tags.toString());
 		return batch == null ? null : batch.getDataPoints();
 	}
 
@@ -73,7 +73,7 @@ public class CachedBatches {
 	 * @return DataPoints for a maximum of one complete hour.
 	 */
 	public static DataPoints get(final String metric, final long timestamp, final Map<String, String> tags) {
-		Batch batch = batches.get(metric + tags.hashCode());
+		Batch batch = batches.get(metric + tags.toString());
 		DataPoints dp = null;
 		if (batch != null && baseTime(timestamp) == batch.batchBaseTime()) {
 			dp = batch.getDataPoints();
@@ -96,7 +96,7 @@ public class CachedBatches {
 	 */
 	public static DataPoints get(final String metric, final Map<String, String> tags,
 			final long startTime, final long endTime) {
-		Batch batch = batches.get(metric + tags.hashCode());
+		Batch batch = batches.get(metric + tags.toString());
 		DataPoints dp = null;
 		if (batch != null) {
 			final long startBase = baseTime(startTime);
@@ -128,10 +128,10 @@ public class CachedBatches {
 	}
 
 	private static Batch getBatch(final TSDB tsdb, final String metric, final long timestamp, final Map<String, String> tags) {
-		Batch batch = batches.get(metric + tags.hashCode());
+		Batch batch = batches.get(metric + tags.toString());
 		if (batch == null) {
 			batch = new Batch(timestamp, tsdb.newBatch(metric, tags));
-			batches.put(metric + tags.hashCode(), batch);
+			batches.put(metric + tags.toString(), batch);
 		}
 		return batch;
 	}
